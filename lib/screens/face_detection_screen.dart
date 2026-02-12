@@ -26,6 +26,13 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
   List<CameraDescription> _cameras = [];
   int _currentCameraIndex = 0;
 
+  bool get _isFrontCamera {
+    if (_cameras.isEmpty || _currentCameraIndex >= _cameras.length) {
+      return false;
+    }
+    return _cameras[_currentCameraIndex].lensDirection == CameraLensDirection.front;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -214,6 +221,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
             _cameraController!.value.previewSize!.height,
             _cameraController!.value.previewSize!.width,
           ),
+          isFrontCamera: _isFrontCamera,
         ),
         Positioned(
           bottom: 30,
@@ -256,14 +264,24 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 class FaceOverlay extends StatelessWidget {
   final List<Face> faces;
   final Size imageSize;
+  final bool isFrontCamera;
 
-  const FaceOverlay({super.key, required this.faces, required this.imageSize});
+  const FaceOverlay({
+    super.key,
+    required this.faces,
+    required this.imageSize,
+    required this.isFrontCamera,
+  });
 
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
       size: Size.infinite,
-      painter: FaceOverlayPainter(faces: faces, imageSize: imageSize),
+      painter: FaceOverlayPainter(
+        faces: faces,
+        imageSize: imageSize,
+        isFrontCamera: isFrontCamera,
+      ),
     );
   }
 }
@@ -271,8 +289,13 @@ class FaceOverlay extends StatelessWidget {
 class FaceOverlayPainter extends CustomPainter {
   final List<Face> faces;
   final Size imageSize;
+  final bool isFrontCamera;
 
-  FaceOverlayPainter({required this.faces, required this.imageSize});
+  FaceOverlayPainter({
+    required this.faces,
+    required this.imageSize,
+    required this.isFrontCamera,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -291,13 +314,19 @@ class FaceOverlayPainter extends CustomPainter {
       final scaleX = size.width / imageSize.width;
       final scaleY = size.height / imageSize.height;
 
-      final rect = Rect.fromLTRB(
-        boundingBox.left * scaleX,
-        boundingBox.top * scaleY,
-        boundingBox.right * scaleX,
-        boundingBox.bottom * scaleY,
-      );
+      // For front camera, mirror the X coordinate
+      double left = boundingBox.left * scaleX;
+      double right = boundingBox.right * scaleX;
+      double top = boundingBox.top * scaleY;
+      double bottom = boundingBox.bottom * scaleY;
 
+      if (isFrontCamera) {
+        final temp = left;
+        left = size.width - right;
+        right = size.width - temp;
+      }
+
+      final rect = Rect.fromLTRB(left, top, right, bottom);
       canvas.drawRect(rect, paint);
 
       final landmarks = face.landmarks;
@@ -317,11 +346,15 @@ class FaceOverlayPainter extends CustomPainter {
     void drawPoint(FaceLandmarkType type) {
       final landmark = landmarks[type];
       if (landmark != null) {
-        canvas.drawCircle(
-          Offset(landmark.position.x * scaleX, landmark.position.y * scaleY),
-          5,
-          paint,
-        );
+        double x = landmark.position.x * scaleX;
+        double y = landmark.position.y * scaleY;
+
+        // For front camera, mirror the X coordinate
+        if (isFrontCamera) {
+          x = imageSize.width * scaleX - x;
+        }
+
+        canvas.drawCircle(Offset(x, y), 5, paint);
       }
     }
 
@@ -337,6 +370,6 @@ class FaceOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(FaceOverlayPainter oldDelegate) {
-    return oldDelegate.faces != faces;
+    return oldDelegate.faces != faces || oldDelegate.isFrontCamera != isFrontCamera;
   }
 }
