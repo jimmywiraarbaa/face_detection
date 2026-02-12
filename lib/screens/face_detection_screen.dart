@@ -1,0 +1,342 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import '../services/face_detector_service.dart';
+
+class FaceDetectionScreen extends StatefulWidget {
+  const FaceDetectionScreen({super.key});
+
+  @override
+  State<FaceDetectionScreen> createState() => _FaceDetectionScreenState();
+}
+
+class _FaceDetectionScreenState extends State<FaceDetectionScreen>
+    with WidgetsBindingObserver {
+  CameraController? _cameraController;
+  final FaceDetectorService _faceDetectorService = FaceDetectorService();
+  List<Face> _detectedFaces = [];
+  bool _isProcessing = false;
+  bool _isCameraInitialized = false;
+  String? _errorMessage;
+  Timer? _detectionTimer;
+
+  List<CameraDescription> _cameras = [];
+  int _currentCameraIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _initializeCamera();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      _stopDetection();
+      _cameraController?.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeCamera();
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
+        setState(() {
+          _errorMessage = 'No cameras available';
+        });
+        return;
+      }
+
+      // Set default to front camera
+      _currentCameraIndex = _cameras.indexWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+      );
+      if (_currentCameraIndex == -1) {
+        _currentCameraIndex = 0;
+      }
+
+      await _initCameraController(_currentCameraIndex);
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error initializing camera: $e';
+      });
+    }
+  }
+
+  Future<void> _initCameraController(int cameraIndex) async {
+    await _cameraController?.dispose();
+    _stopDetection();
+
+    setState(() {
+      _isCameraInitialized = false;
+      _detectedFaces = [];
+    });
+
+    _cameraController = CameraController(
+      _cameras[cameraIndex],
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+
+    await _cameraController!.initialize();
+
+    setState(() {
+      _isCameraInitialized = true;
+      _errorMessage = null;
+    });
+
+    _startDetection();
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras.length <= 1) return;
+
+    final newIndex = (_currentCameraIndex + 1) % _cameras.length;
+    await _initCameraController(newIndex);
+
+    setState(() {
+      _currentCameraIndex = newIndex;
+    });
+  }
+
+  void _startDetection() {
+    _detectionTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!_isProcessing) {
+        _detectFaces();
+      }
+    });
+  }
+
+  void _stopDetection() {
+    _detectionTimer?.cancel();
+    _detectionTimer = null;
+  }
+
+  Future<void> _detectFaces() async {
+    if (_isProcessing || _cameraController == null) return;
+
+    _isProcessing = true;
+
+    try {
+      final image = await _cameraController!.takePicture();
+      final inputImage = InputImage.fromFilePath(image.path);
+
+      await _faceDetectorService.detectFacesFromImage(inputImage);
+
+      if (mounted) {
+        setState(() {
+          _detectedFaces = _faceDetectorService.faces;
+        });
+      }
+
+      // Delete temp file
+      try {
+        final file = File(image.path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    } catch (e) {
+      // Silently fail to avoid spamming logs
+    } finally {
+      _isProcessing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _stopDetection();
+    _cameraController?.dispose();
+    _faceDetectorService.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Face Detection'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Colors.red),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  _errorMessage = null;
+                });
+                _initializeCamera();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!_isCameraInitialized) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Stack(
+      children: [
+        Center(child: CameraPreview(_cameraController!)),
+        FaceOverlay(
+          faces: _detectedFaces,
+          imageSize: Size(
+            _cameraController!.value.previewSize!.height,
+            _cameraController!.value.previewSize!.width,
+          ),
+        ),
+        Positioned(
+          bottom: 30,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'Faces detected: ${_detectedFaces.length}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Camera switch button
+        if (_cameras.length > 1)
+          Positioned(
+            top: 20,
+            right: 20,
+            child: FloatingActionButton(
+              heroTag: 'switch_camera',
+              onPressed: _switchCamera,
+              child: const Icon(Icons.cameraswitch),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class FaceOverlay extends StatelessWidget {
+  final List<Face> faces;
+  final Size imageSize;
+
+  const FaceOverlay({super.key, required this.faces, required this.imageSize});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.infinite,
+      painter: FaceOverlayPainter(faces: faces, imageSize: imageSize),
+    );
+  }
+}
+
+class FaceOverlayPainter extends CustomPainter {
+  final List<Face> faces;
+  final Size imageSize;
+
+  FaceOverlayPainter({required this.faces, required this.imageSize});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..color = Colors.green;
+
+    final landmarkPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = Colors.blue;
+
+    for (final face in faces) {
+      final boundingBox = face.boundingBox;
+
+      final scaleX = size.width / imageSize.width;
+      final scaleY = size.height / imageSize.height;
+
+      final rect = Rect.fromLTRB(
+        boundingBox.left * scaleX,
+        boundingBox.top * scaleY,
+        boundingBox.right * scaleX,
+        boundingBox.bottom * scaleY,
+      );
+
+      canvas.drawRect(rect, paint);
+
+      final landmarks = face.landmarks;
+      if (landmarks.isNotEmpty) {
+        _drawLandmarks(canvas, landmarks, scaleX, scaleY, landmarkPaint);
+      }
+    }
+  }
+
+  void _drawLandmarks(
+    Canvas canvas,
+    Map<FaceLandmarkType, FaceLandmark?> landmarks,
+    double scaleX,
+    double scaleY,
+    Paint paint,
+  ) {
+    void drawPoint(FaceLandmarkType type) {
+      final landmark = landmarks[type];
+      if (landmark != null) {
+        canvas.drawCircle(
+          Offset(landmark.position.x * scaleX, landmark.position.y * scaleY),
+          5,
+          paint,
+        );
+      }
+    }
+
+    drawPoint(FaceLandmarkType.leftEye);
+    drawPoint(FaceLandmarkType.rightEye);
+    drawPoint(FaceLandmarkType.noseBase);
+    drawPoint(FaceLandmarkType.leftEar);
+    drawPoint(FaceLandmarkType.rightEar);
+    drawPoint(FaceLandmarkType.leftMouth);
+    drawPoint(FaceLandmarkType.rightMouth);
+    drawPoint(FaceLandmarkType.bottomMouth);
+  }
+
+  @override
+  bool shouldRepaint(FaceOverlayPainter oldDelegate) {
+    return oldDelegate.faces != faces;
+  }
+}
