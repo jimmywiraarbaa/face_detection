@@ -5,6 +5,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../services/face_detector_service.dart';
+import '../services/face_recognition_service.dart';
+import '../services/face_storage_service.dart';
+import 'face_registration_screen.dart';
 
 class FaceDetectionScreen extends StatefulWidget {
   const FaceDetectionScreen({super.key});
@@ -17,6 +20,9 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     with WidgetsBindingObserver {
   CameraController? _cameraController;
   final FaceDetectorService _faceDetectorService = FaceDetectorService();
+  final FaceRecognitionService _faceRecognitionService = FaceRecognitionService();
+  final FaceStorageService _faceStorageService = FaceStorageService();
+
   List<Face> _detectedFaces = [];
   bool _isProcessing = false;
   bool _isCameraInitialized = false;
@@ -26,6 +32,9 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
   List<CameraDescription> _cameras = [];
   int _currentCameraIndex = 0;
   bool _isInBackground = false;
+
+  List<FaceData> _registeredFaces = [];
+  String? _recognizedName;
 
   bool get _isFrontCamera {
     if (_cameras.isEmpty || _currentCameraIndex >= _cameras.length) {
@@ -39,6 +48,8 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initializeCamera();
+    _loadRegisteredFaces();
+    _loadFaceRecognitionModel();
   }
 
   @override
@@ -57,6 +68,19 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     }
   }
 
+  Future<void> _loadRegisteredFaces() async {
+    final faces = await _faceStorageService.getRegisteredFaces();
+    if (mounted) {
+      setState(() {
+        _registeredFaces = faces;
+      });
+    }
+  }
+
+  Future<void> _loadFaceRecognitionModel() async {
+    await _faceRecognitionService.loadModel();
+  }
+
   Future<void> _stopCamera() async {
     _stopDetection();
     await _cameraController?.dispose();
@@ -66,6 +90,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
       setState(() {
         _isCameraInitialized = false;
         _detectedFaces = [];
+        _recognizedName = null;
       });
     }
   }
@@ -113,6 +138,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
       setState(() {
         _isCameraInitialized = false;
         _detectedFaces = [];
+        _recognizedName = null;
       });
     }
 
@@ -187,6 +213,11 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
         setState(() {
           _detectedFaces = _faceDetectorService.faces;
         });
+
+        // Check if any registered face matches
+        if (_detectedFaces.isNotEmpty && _registeredFaces.isNotEmpty) {
+          await _checkFaceRecognition(image.path);
+        }
       }
 
       // Delete temp file
@@ -203,12 +234,155 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     }
   }
 
+  Future<void> _checkFaceRecognition(String imagePath) async {
+    if (_detectedFaces.isEmpty || _registeredFaces.isEmpty) return;
+
+    for (final face in _detectedFaces) {
+      try {
+        final embedding = await _faceRecognitionService.getFaceEmbedding(imagePath, face);
+
+        for (final registeredFace in _registeredFaces) {
+          if (_faceRecognitionService.isSameFaceMultiple(
+            embedding,
+            registeredFace.embeddings,
+          )) {
+            if (mounted) {
+              setState(() {
+                _recognizedName = registeredFace.name;
+              });
+            }
+            return;
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _recognizedName = null;
+          });
+        }
+      } catch (e) {
+        // Silently handle recognition errors
+      }
+    }
+  }
+
+  Future<void> _showRegisterDialog() async {
+    final controller = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Register Face'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Enter your name to register this face:'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: 'Name',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: true,
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter a name')),
+                  );
+                  return;
+                }
+                Navigator.of(context).pop(name);
+              },
+              child: const Text('Next'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != null && result.isNotEmpty) {
+      if (!mounted) return;
+      // Import the FaceRegistrationScreen at the top of the file
+      final registered = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (context) => FaceRegistrationScreen(name: result),
+        ),
+      );
+
+      if (registered == true) {
+        await _loadRegisteredFaces();
+      }
+    }
+  }
+
+  Future<void> _showRegisteredFacesDialog() async {
+    await _loadRegisteredFaces();
+
+    if (!mounted) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Registered Faces (${_registeredFaces.length})'),
+          content: _registeredFaces.isEmpty
+              ? const Text('No faces registered yet.')
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ...ListTile.divideTiles(
+                      tiles: _registeredFaces.map((face) {
+                        return ListTile(
+                          title: Text(face.name),
+                          subtitle: Text(
+                            'Registered: ${face.registeredAt.day}/${face.registeredAt.month}/${face.registeredAt.year}',
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete),
+                            onPressed: () async {
+                              await _faceStorageService.deleteFace(face.name);
+                              if (!mounted) return;
+                              Navigator.of(context).pop();
+                              await _loadRegisteredFaces();
+                              if (!mounted) return;
+                              _showRegisteredFacesDialog();
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+          actions: <Widget>[
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopDetection();
     _cameraController?.dispose();
     _faceDetectorService.dispose();
+    _faceRecognitionService.dispose();
     super.dispose();
   }
 
@@ -223,8 +397,21 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
         appBar: AppBar(
           title: const Text('Face Detection'),
           backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.people),
+              onPressed: _showRegisteredFacesDialog,
+              tooltip: 'Registered Faces',
+            ),
+          ],
         ),
         body: _buildBody(),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _showRegisterDialog,
+          backgroundColor: Colors.blue,
+          icon: const Icon(Icons.person_add),
+          label: const Text('Register Face'),
+        ),
       ),
     );
   }
@@ -274,8 +461,39 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
           ),
           isFrontCamera: _isFrontCamera,
         ),
+        // Recognized name badge
+        if (_recognizedName != null)
+          Positioned(
+            top: 80,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withAlpha(230),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$_recognizedName',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         Positioned(
-          bottom: 30,
+          bottom: 100,
           left: 0,
           right: 0,
           child: Center(
@@ -305,6 +523,34 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
               heroTag: 'switch_camera',
               onPressed: _switchCamera,
               child: const Icon(Icons.cameraswitch),
+            ),
+          ),
+        // Registered faces count
+        if (_registeredFaces.isNotEmpty)
+          Positioned(
+            top: 20,
+            left: 20,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withAlpha(200),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.people, color: Colors.white, size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${_registeredFaces.length}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
       ],

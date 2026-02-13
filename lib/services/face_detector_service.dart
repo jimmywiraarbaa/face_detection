@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 class FaceDetectorService {
@@ -22,7 +21,6 @@ class FaceDetectorService {
     try {
       _faces = await _faceDetector.processImage(inputImage);
     } catch (e) {
-      print('Error detecting faces: $e');
       _faces = [];
     }
   }
