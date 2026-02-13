@@ -269,6 +269,9 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
   Future<void> _showRegisterDialog() async {
     final controller = TextEditingController();
 
+    // Pause detection while showing dialog
+    _stopDetection();
+
     final result = await showDialog<String>(
       context: context,
       builder: (BuildContext context) {
@@ -314,6 +317,10 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
     if (result != null && result.isNotEmpty) {
       if (!mounted) return;
+      // Stop camera before navigating to registration screen
+      await _stopCamera();
+
+      if (!mounted) return;
       // Import the FaceRegistrationScreen at the top of the file
       final registered = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
@@ -321,8 +328,18 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
         ),
       );
 
-      if (registered == true) {
+      if (registered == true && mounted) {
         await _loadRegisteredFaces();
+      }
+
+      // Re-initialize camera after returning from registration
+      if (mounted) {
+        await _initializeCamera();
+      }
+    } else {
+      // User cancelled, restart detection
+      if (mounted && _isCameraInitialized) {
+        _startDetection();
       }
     }
   }
@@ -388,30 +405,24 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      onPopInvokedWithResult: (didPop, result) async {
-        // Stop camera when leaving screen
-        await _stopCamera();
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Face Detection'),
-          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.people),
-              onPressed: _showRegisteredFacesDialog,
-              tooltip: 'Registered Faces',
-            ),
-          ],
-        ),
-        body: _buildBody(),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _showRegisterDialog,
-          backgroundColor: Colors.blue,
-          icon: const Icon(Icons.person_add),
-          label: const Text('Register Face'),
-        ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Face Detection'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.people),
+            onPressed: _showRegisteredFacesDialog,
+            tooltip: 'Registered Faces',
+          ),
+        ],
+      ),
+      body: _buildBody(),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showRegisterDialog,
+        backgroundColor: Colors.blue,
+        icon: const Icon(Icons.person_add),
+        label: const Text('Register Face'),
       ),
     );
   }
