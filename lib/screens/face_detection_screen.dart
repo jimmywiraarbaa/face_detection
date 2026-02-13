@@ -25,6 +25,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
   List<CameraDescription> _cameras = [];
   int _currentCameraIndex = 0;
+  bool _isInBackground = false;
 
   bool get _isFrontCamera {
     if (_cameras.isEmpty || _currentCameraIndex >= _cameras.length) {
@@ -42,25 +43,47 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return;
-    }
-
-    if (state == AppLifecycleState.inactive) {
-      _stopDetection();
-      _cameraController?.dispose();
+    // Handle app lifecycle changes
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      // App going to background
+      _isInBackground = true;
+      _stopCamera();
     } else if (state == AppLifecycleState.resumed) {
+      // App coming to foreground
+      _isInBackground = false;
       _initializeCamera();
     }
   }
 
+  Future<void> _stopCamera() async {
+    _stopDetection();
+    await _cameraController?.dispose();
+    _cameraController = null;
+
+    if (mounted) {
+      setState(() {
+        _isCameraInitialized = false;
+        _detectedFaces = [];
+      });
+    }
+  }
+
   Future<void> _initializeCamera() async {
+    if (_isInBackground) {
+      // Don't initialize if in background
+      return;
+    }
+
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
-        setState(() {
-          _errorMessage = 'No cameras available';
-        });
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'No cameras available';
+          });
+        }
         return;
       }
 
@@ -74,9 +97,11 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
       await _initCameraController(_currentCameraIndex);
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Error initializing camera: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error initializing camera: $e';
+        });
+      }
     }
   }
 
@@ -84,10 +109,12 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     await _cameraController?.dispose();
     _stopDetection();
 
-    setState(() {
-      _isCameraInitialized = false;
-      _detectedFaces = [];
-    });
+    if (mounted) {
+      setState(() {
+        _isCameraInitialized = false;
+        _detectedFaces = [];
+      });
+    }
 
     _cameraController = CameraController(
       _cameras[cameraIndex],
@@ -97,12 +124,14 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
     await _cameraController!.initialize();
 
-    setState(() {
-      _isCameraInitialized = true;
-      _errorMessage = null;
-    });
+    if (mounted) {
+      setState(() {
+        _isCameraInitialized = true;
+        _errorMessage = null;
+      });
 
-    _startDetection();
+      _startDetection();
+    }
   }
 
   Future<void> _switchCamera() async {
@@ -111,26 +140,40 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     final newIndex = (_currentCameraIndex + 1) % _cameras.length;
     await _initCameraController(newIndex);
 
-    setState(() {
-      _currentCameraIndex = newIndex;
-    });
+    if (mounted) {
+      setState(() {
+        _currentCameraIndex = newIndex;
+      });
+    }
   }
 
   void _startDetection() {
+    if (_isInBackground) {
+      // Don't start if in background
+      return;
+    }
+
     _detectionTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!_isProcessing) {
-        _detectFaces();
+      if (_isProcessing || _isInBackground) {
+        return;
       }
+      _detectFaces();
     });
   }
 
   void _stopDetection() {
     _detectionTimer?.cancel();
     _detectionTimer = null;
+    _isProcessing = false;
   }
 
   Future<void> _detectFaces() async {
-    if (_isProcessing || _cameraController == null) return;
+    if (_isProcessing ||
+        _cameraController == null ||
+        !_cameraController!.value.isInitialized ||
+        _isInBackground) {
+      return;
+    }
 
     _isProcessing = true;
 
@@ -140,7 +183,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
       await _faceDetectorService.detectFacesFromImage(inputImage);
 
-      if (mounted) {
+      if (mounted && !_isInBackground) {
         setState(() {
           _detectedFaces = _faceDetectorService.faces;
         });
@@ -171,12 +214,18 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Face Detection'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) async {
+        // Stop camera when leaving screen
+        await _stopCamera();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Face Detection'),
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        ),
+        body: _buildBody(),
       ),
-      body: _buildBody(),
     );
   }
 
@@ -196,9 +245,11 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () {
-                setState(() {
-                  _errorMessage = null;
-                });
+                if (mounted) {
+                  setState(() {
+                    _errorMessage = null;
+                  });
+                }
                 _initializeCamera();
               },
               child: const Text('Retry'),
