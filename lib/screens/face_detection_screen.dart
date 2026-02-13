@@ -24,7 +24,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
   final FaceRecognitionService _faceRecognitionService = FaceRecognitionService();
   final FaceStorageService _faceStorageService = FaceStorageService();
 
-  List<Face> _detectedFaces = [];
+  Face? _detectedFace;
   bool _isProcessing = false;
   bool _isCameraInitialized = false;
   String? _errorMessage;
@@ -36,6 +36,9 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 
   List<FaceData> _registeredFaces = [];
   String? _recognizedName;
+
+  // Detection area size in pixels (center of screen)
+  static const double _detectionAreaSize = 112.0;
 
   bool get _isFrontCamera {
     if (_cameras.isEmpty || _currentCameraIndex >= _cameras.length) {
@@ -90,7 +93,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     if (mounted) {
       setState(() {
         _isCameraInitialized = false;
-        _detectedFaces = [];
+        _detectedFace = null;
         _recognizedName = null;
       });
     }
@@ -138,7 +141,7 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     if (mounted) {
       setState(() {
         _isCameraInitialized = false;
-        _detectedFaces = [];
+        _detectedFace = null;
         _recognizedName = null;
       });
     }
@@ -211,12 +214,40 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
       await _faceDetectorService.detectFacesFromImage(inputImage);
 
       if (mounted && !_isInBackground) {
+        // Get image dimensions (swapped due to camera rotation)
+        final imageSize = _cameraController!.value.previewSize!;
+        final imageWidth = imageSize.height;  // Swapped
+        final imageHeight = imageSize.width; // Swapped
+
+        // Calculate center detection area (112x112)
+        final areaLeft = (imageWidth - _detectionAreaSize) / 2;
+        final areaRight = (imageWidth + _detectionAreaSize) / 2;
+        final areaTop = (imageHeight - _detectionAreaSize) / 2;
+        final areaBottom = (imageHeight + _detectionAreaSize) / 2;
+
+        // Find first face within detection area
+        Face? detectedFaceInArea;
+        for (final face in _faceDetectorService.faces) {
+          final bbox = face.boundingBox;
+          final faceCenterX = (bbox.left + bbox.right) / 2;
+          final faceCenterY = (bbox.top + bbox.bottom) / 2;
+
+          // Check if face center is within detection area
+          if (faceCenterX >= areaLeft &&
+              faceCenterX <= areaRight &&
+              faceCenterY >= areaTop &&
+              faceCenterY <= areaBottom) {
+            detectedFaceInArea = face;
+            break;
+          }
+        }
+
         setState(() {
-          _detectedFaces = _faceDetectorService.faces;
+          _detectedFace = detectedFaceInArea;
         });
 
         // Check if any registered face matches
-        if (_detectedFaces.isNotEmpty && _registeredFaces.isNotEmpty) {
+        if (_detectedFace != null && _registeredFaces.isNotEmpty) {
           await _checkFaceRecognition(image.path);
         }
       }
@@ -236,34 +267,32 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
   }
 
   Future<void> _checkFaceRecognition(String imagePath) async {
-    if (_detectedFaces.isEmpty || _registeredFaces.isEmpty) return;
+    if (_detectedFace == null || _registeredFaces.isEmpty) return;
 
-    for (final face in _detectedFaces) {
-      try {
-        final embedding = await _faceRecognitionService.getFaceEmbedding(imagePath, face);
+    try {
+      final embedding = await _faceRecognitionService.getFaceEmbedding(imagePath, _detectedFace!);
 
-        for (final registeredFace in _registeredFaces) {
-          if (_faceRecognitionService.isSameFaceMultiple(
-            embedding,
-            registeredFace.embeddings,
-          )) {
-            if (mounted) {
-              setState(() {
-                _recognizedName = registeredFace.name;
-              });
-            }
-            return;
+      for (final registeredFace in _registeredFaces) {
+        if (_faceRecognitionService.isSameFaceMultiple(
+          embedding,
+          registeredFace.embeddings,
+        )) {
+          if (mounted) {
+            setState(() {
+              _recognizedName = registeredFace.name;
+            });
           }
+          return;
         }
-
-        if (mounted) {
-          setState(() {
-            _recognizedName = null;
-          });
-        }
-      } catch (e) {
-        // Silently handle recognition errors
       }
+
+      if (mounted) {
+        setState(() {
+          _recognizedName = null;
+        });
+      }
+    } catch (e) {
+      // Silently handle recognition errors
     }
   }
 
@@ -322,7 +351,6 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
       await _stopCamera();
 
       if (!mounted) return;
-      // Import the FaceRegistrationScreen at the top of the file
       final registered = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
           builder: (context) => FaceRegistrationScreen(name: result),
@@ -435,15 +463,16 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
           child: FacePositioningGuide(),
         ),
         FaceOverlay(
-          faces: _detectedFaces,
+          face: _detectedFace,
           imageSize: Size(
             _cameraController!.value.previewSize!.height,
             _cameraController!.value.previewSize!.width,
           ),
           isFrontCamera: _isFrontCamera,
+          isRecognized: _recognizedName != null,
         ),
-        // Recognized name badge
-        if (_recognizedName != null)
+        // Recognition status badge
+        if (_detectedFace != null)
           Positioned(
             top: 80,
             left: 0,
@@ -452,16 +481,21 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 decoration: BoxDecoration(
-                  color: Colors.green.withAlpha(230),
+                  color: _recognizedName != null
+                      ? Colors.green.withAlpha(230)
+                      : Colors.red.withAlpha(230),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.check_circle, color: Colors.white),
+                    Icon(
+                      _recognizedName != null ? Icons.check_circle : Icons.warning,
+                      color: Colors.white,
+                    ),
                     const SizedBox(width: 8),
                     Text(
-                      '$_recognizedName',
+                      _recognizedName != null ? _recognizedName! : 'Belum terdaftar',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -473,28 +507,6 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
               ),
             ),
           ),
-        Positioned(
-          bottom: 100,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                'Faces detected: ${_detectedFaces.length}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        ),
         // Camera switch button
         if (_cameras.length > 1)
           Positioned(
@@ -540,15 +552,17 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
 }
 
 class FaceOverlay extends StatelessWidget {
-  final List<Face> faces;
+  final Face? face;
   final Size imageSize;
   final bool isFrontCamera;
+  final bool isRecognized;
 
   const FaceOverlay({
     super.key,
-    required this.faces,
+    required this.face,
     required this.imageSize,
     required this.isFrontCamera,
+    required this.isRecognized,
   });
 
   @override
@@ -556,58 +570,63 @@ class FaceOverlay extends StatelessWidget {
     return CustomPaint(
       size: Size.infinite,
       painter: FaceOverlayPainter(
-        faces: faces,
+        face: face,
         imageSize: imageSize,
         isFrontCamera: isFrontCamera,
+        isRecognized: isRecognized,
       ),
     );
   }
 }
 
 class FaceOverlayPainter extends CustomPainter {
-  final List<Face> faces;
+  final Face? face;
   final Size imageSize;
   final bool isFrontCamera;
+  final bool isRecognized;
 
   FaceOverlayPainter({
-    required this.faces,
+    required this.face,
     required this.imageSize,
     required this.isFrontCamera,
+    required this.isRecognized,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (face == null) return;
+
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0
-      ..color = Colors.green;
+      ..color = isRecognized ? Colors.green : Colors.red;
 
-    for (final face in faces) {
-      final boundingBox = face.boundingBox;
+    final boundingBox = face!.boundingBox;
 
-      final scaleX = size.width / imageSize.width;
-      final scaleY = size.height / imageSize.height;
+    final scaleX = size.width / imageSize.width;
+    final scaleY = size.height / imageSize.height;
 
-      // For front camera, mirror the X coordinate
-      double left = boundingBox.left * scaleX;
-      double right = boundingBox.right * scaleX;
-      double top = boundingBox.top * scaleY;
-      double bottom = boundingBox.bottom * scaleY;
+    // For front camera, mirror X coordinate
+    double left = boundingBox.left * scaleX;
+    double right = boundingBox.right * scaleX;
+    double top = boundingBox.top * scaleY;
+    double bottom = boundingBox.bottom * scaleY;
 
-      if (isFrontCamera) {
-        final temp = left;
-        left = size.width - right;
-        right = size.width - temp;
-      }
-
-      final rect = Rect.fromLTRB(left, top, right, bottom);
-      canvas.drawRect(rect, paint);
+    if (isFrontCamera) {
+      final temp = left;
+      left = size.width - right;
+      right = size.width - temp;
     }
+
+    final rect = Rect.fromLTRB(left, top, right, bottom);
+    canvas.drawRect(rect, paint);
   }
 
   @override
   bool shouldRepaint(FaceOverlayPainter oldDelegate) {
-    return oldDelegate.faces != faces || oldDelegate.isFrontCamera != isFrontCamera;
+    return oldDelegate.face != face ||
+        oldDelegate.isFrontCamera != isFrontCamera ||
+        oldDelegate.isRecognized != isRecognized;
   }
 }
 
@@ -745,3 +764,4 @@ class FacePositioningGuidePainter extends CustomPainter {
     return oldDelegate.ovalWidth != ovalWidth || oldDelegate.ovalHeight != ovalHeight;
   }
 }
+

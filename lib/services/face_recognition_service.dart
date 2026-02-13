@@ -65,16 +65,16 @@ class FaceRecognitionService {
     const padding = 20;
     final x = math.max(0, (left - padding).toInt());
     final y = math.max(0, (top - padding).toInt());
-    final width = math.min((right - left + padding * 2).toInt(), image.width - x);
-    final height = math.min((bottom - top + padding * 2).toInt(), image.height - y);
-
-    return img.copyCrop(
-      image,
-      x: x,
-      y: y,
-      width: width,
-      height: height,
+    final width = math.min(
+      (right - left + padding * 2).toInt(),
+      image.width - x,
     );
+    final height = math.min(
+      (bottom - top + padding * 2).toInt(),
+      image.height - y,
+    );
+
+    return img.copyCrop(image, x: x, y: y, width: width, height: height);
   }
 
   List<List<List<double>>> _preprocessImage(img.Image faceImage) {
@@ -89,23 +89,19 @@ class FaceRecognitionService {
     // Convert to float array and normalize
     final input = List.generate(
       _inputSize,
-      (y) => List.generate(
-        _inputSize,
-        (x) {
-          final pixel = resized.getPixel(x, y);
-          return [
-            pixel.r / 255.0,
-            pixel.g / 255.0,
-            pixel.b / 255.0,
-          ];
-        },
-      ),
+      (y) => List.generate(_inputSize, (x) {
+        final pixel = resized.getPixel(x, y);
+        return [pixel.r / 255.0, pixel.g / 255.0, pixel.b / 255.0];
+      }),
     );
 
     return input;
   }
 
-  double calculateCosineSimilarity(List<double> embedding1, List<double> embedding2) {
+  double calculateCosineSimilarity(
+    List<double> embedding1,
+    List<double> embedding2,
+  ) {
     if (embedding1.length != embedding2.length) {
       return 0.0;
     }
@@ -123,7 +119,10 @@ class FaceRecognitionService {
     return dotProduct / (math.sqrt(norm1) * math.sqrt(norm2));
   }
 
-  double calculateEuclideanDistance(List<double> embedding1, List<double> embedding2) {
+  double calculateEuclideanDistance(
+    List<double> embedding1,
+    List<double> embedding2,
+  ) {
     if (embedding1.length != embedding2.length) {
       return double.infinity;
     }
@@ -136,13 +135,20 @@ class FaceRecognitionService {
     return math.sqrt(sum);
   }
 
-  bool isSameFace(List<double> embedding1, List<double> embedding2, {double threshold = 0.8}) {
+  bool isSameFace(
+    List<double> embedding1,
+    List<double> embedding2, {
+    double threshold = 0.5,
+  }) {
     final similarity = calculateCosineSimilarity(embedding1, embedding2);
     return similarity >= threshold;
   }
 
   /// Compare an embedding against multiple embeddings and return the best similarity score
-  double getBestSimilarity(List<double> embedding, List<List<double>> embeddings) {
+  double getBestSimilarity(
+    List<double> embedding,
+    List<List<double>> embeddings,
+  ) {
     if (embeddings.isEmpty) return 0.0;
 
     double bestSimilarity = 0.0;
@@ -156,7 +162,11 @@ class FaceRecognitionService {
   }
 
   /// Compare an embedding against multiple embeddings and return true if any match above threshold
-  bool isSameFaceMultiple(List<double> embedding, List<List<double>> embeddings, {double threshold = 0.8}) {
+  bool isSameFaceMultiple(
+    List<double> embedding,
+    List<List<double>> embeddings, {
+    double threshold = 0.5,
+  }) {
     return getBestSimilarity(embedding, embeddings) >= threshold;
   }
 
