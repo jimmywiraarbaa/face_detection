@@ -96,19 +96,9 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
     }
   }
 
-  String _getPositionIcon(FacePosition position) {
-    switch (position) {
-      case FacePosition.center:
-        return '😐';
-      case FacePosition.up:
-        return '😃';
-      case FacePosition.down:
-        return '😔';
-      case FacePosition.left:
-        return '🙁';
-      case FacePosition.right:
-        return '😊';
-    }
+  String _getPositionNumber(FacePosition position) {
+    final index = FacePosition.values.indexOf(position);
+    return '${index + 1}';
   }
 
   double get _currentPositionProgress {
@@ -118,10 +108,9 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
 
   /// Check if the head rotation matches the required position
   bool _checkHeadPosition(Face face) {
-    var headEulerAngleX = face.headEulerAngleX ?? 0; // Up/Down rotation
-    var headEulerAngleY = face.headEulerAngleY ?? 0; // Left/Right rotation
+    var headEulerAngleX = face.headEulerAngleX ?? 0;
+    var headEulerAngleY = face.headEulerAngleY ?? 0;
 
-    // Flip angles for front camera because the preview is mirrored
     if (_isFrontCamera) {
       headEulerAngleY = -headEulerAngleY;
       headEulerAngleX = -headEulerAngleX;
@@ -129,7 +118,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
 
     switch (_currentPosition) {
       case FacePosition.center:
-        // Face should be relatively straight (within 15 degrees)
         final isCenter = headEulerAngleX.abs() < 15 && headEulerAngleY.abs() < 15;
         if (!isCenter) {
           _headPositionFeedback = 'Lihat lurus ke depan';
@@ -137,7 +125,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         return isCenter;
 
       case FacePosition.up:
-        // Head should be tilted up (X angle should be negative, around -15 to -45 degrees)
         final isUp = headEulerAngleX < -10 && headEulerAngleX > -50;
         if (!isUp) {
           if (headEulerAngleX > -5) {
@@ -149,7 +136,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         return isUp;
 
       case FacePosition.down:
-        // Head should be tilted down (X angle should be positive, around 15 to 45 degrees)
         final isDown = headEulerAngleX > 10 && headEulerAngleX < 50;
         if (!isDown) {
           if (headEulerAngleX < 5) {
@@ -161,7 +147,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         return isDown;
 
       case FacePosition.left:
-        // Head should be turned left (Y angle should be negative for looking left)
         final isLeft = headEulerAngleY < -15 && headEulerAngleY > -60;
         if (!isLeft) {
           if (headEulerAngleY > -10) {
@@ -173,7 +158,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         return isLeft;
 
       case FacePosition.right:
-        // Head should be turned right (Y angle should be positive for looking right)
         final isRight = headEulerAngleY > 15 && headEulerAngleY < 60;
         if (!isRight) {
           if (headEulerAngleY < 10) {
@@ -315,7 +299,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
 
     final currentFrames = _capturedEmbeddings[_currentPosition] ?? [];
     if (currentFrames.length >= _requiredFramesPerPosition) {
-      // Stop capturing when position is complete, wait for user to press "Next Position" button
       return;
     }
 
@@ -323,17 +306,13 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
     _headPositionFeedback = null;
 
     try {
-      // Always try to capture and detect faces
       final image = await _cameraController!.takePicture();
       final inputImage = InputImage.fromFilePath(image.path);
 
-      // Detect faces from the captured image
       await _faceDetectorService.detectFacesFromImage(inputImage);
 
       if (mounted && !_isInBackground && _faceDetectorService.faces.isNotEmpty) {
         final face = _faceDetectorService.faces.first;
-
-        // Check if head position matches required position
         final isPositionCorrect = _checkHeadPosition(face);
 
         setState(() {
@@ -341,7 +320,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
           _detectedFaces = _faceDetectorService.faces;
         });
 
-        // Only capture and save embedding if head position is correct
         if (isPositionCorrect) {
           final embedding = await _faceRecognitionService.getFaceEmbedding(image.path, face);
 
@@ -350,7 +328,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
           });
         }
       } else {
-        // Update detected faces even if no face found (for UI indicator)
         if (mounted) {
           setState(() {
             _isHeadPositionCorrect = false;
@@ -366,7 +343,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         }
       } catch (_) {}
     } catch (e) {
-      // Update detected faces on error (for UI indicator)
       if (mounted) {
         setState(() {
           _isHeadPositionCorrect = false;
@@ -390,7 +366,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         _detectedFaces = [];
       });
     } else {
-      // All positions complete
       _stopCapture();
       _finalizeRegistration();
     }
@@ -461,29 +436,35 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
   Widget _buildBody() {
     if (_errorMessage != null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage!,
-              style: const TextStyle(fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                if (mounted) {
-                  setState(() {
-                    _errorMessage = null;
-                  });
-                }
-                _initializeCamera();
-              },
-              child: const Text('Retry'),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Error',
+                style: TextStyle(fontSize: 32, color: Colors.red, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage!,
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () {
+                  if (mounted) {
+                    setState(() {
+                      _errorMessage = null;
+                    });
+                  }
+                  _initializeCamera();
+                },
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -503,7 +484,6 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
           ),
           isFrontCamera: _isFrontCamera,
         ),
-        // Face positioning guideline
         Positioned(
           top: 0,
           left: 0,
@@ -515,65 +495,49 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         ),
         // Current position indicator
         Positioned(
-          top: 80,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.black.withAlpha(200),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    _getPositionIcon(_currentPosition),
-                    style: const TextStyle(fontSize: 48),
+          top: 70,
+          left: 20,
+          right: 20,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.black.withAlpha(180),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  _getPositionLabel(_currentPosition),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _getPositionLabel(_currentPosition),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _getPositionInstruction(_currentPosition),
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 13,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _getPositionInstruction(_currentPosition),
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 14,
-                    ),
-                  ),
-                  // Head position feedback
-                  if (_headPositionFeedback != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _isHeadPositionCorrect ? Icons.check_circle : Icons.info_outline,
-                            color: _isHeadPositionCorrect ? Colors.green : Colors.orange,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _headPositionFeedback!,
-                            style: TextStyle(
-                              color: _isHeadPositionCorrect ? Colors.green : Colors.orange,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
+                  textAlign: TextAlign.center,
+                ),
+                if (_headPositionFeedback != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      _headPositionFeedback!,
+                      style: TextStyle(
+                        color: _isHeadPositionCorrect ? Colors.green : Colors.orange,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
                       ),
+                      textAlign: TextAlign.center,
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
         ),
@@ -587,7 +551,7 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
               '${_capturedEmbeddings[_currentPosition]!.length} / $_requiredFramesPerPosition',
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 36,
+                fontSize: 48,
                 fontWeight: FontWeight.bold,
                 shadows: [
                   Shadow(
@@ -599,28 +563,27 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
             ),
           ),
         ),
-        // Progress bar for current position
+        // Progress section
         Positioned(
-          bottom: 120,
-          left: 40,
-          right: 40,
+          bottom: 100,
+          left: 20,
+          right: 20,
           child: Column(
             children: [
+              // Progress bar
               ClipRRect(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 child: LinearProgressIndicator(
                   value: _currentPositionProgress,
-                  minHeight: 12,
+                  minHeight: 8,
                   backgroundColor: Colors.grey.withAlpha(100),
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    _currentPositionProgress >= 1.0
-                        ? Colors.green
-                        : Colors.blue,
+                    _currentPositionProgress >= 1.0 ? Colors.green : Colors.blue,
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              // Overall progress indicator
+              const SizedBox(height: 20),
+              // Position indicators
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: FacePosition.values.map((position) {
@@ -629,10 +592,10 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
                   final isCurrent = position == _currentPosition;
 
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         color: isComplete
                             ? Colors.green
@@ -646,18 +609,23 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
                       ),
                       child: Center(
                         child: Text(
-                          _getPositionIcon(position),
-                          style: const TextStyle(fontSize: 20),
+                          _getPositionNumber(position),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                     ),
                   );
                 }).toList(),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
+              // Status text
               Text(
                 _capturedEmbeddings[_currentPosition]!.length >= _requiredFramesPerPosition
-                    ? 'Posisi selesai! Tekan tombol panah hijau untuk lanjut'
+                    ? 'Posisi selesai! Tekan LANJUT untuk lanjut'
                     : 'Posisi ${FacePosition.values.indexOf(_currentPosition) + 1} dari ${FacePosition.values.length}',
                 style: const TextStyle(
                   color: Colors.white,
@@ -666,104 +634,95 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
                 ),
                 textAlign: TextAlign.center,
               ),
+              // Detection status
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _detectedFaces.isEmpty
+                      ? Colors.red.withAlpha(200)
+                      : _isHeadPositionCorrect
+                          ? Colors.green.withAlpha(200)
+                          : Colors.orange.withAlpha(200),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  _detectedFaces.isEmpty
+                      ? 'Tidak ada wajah'
+                      : _isHeadPositionCorrect
+                          ? 'Posisi tepat! Mengcapture...'
+                          : 'Posisi kurang tepat',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
-        // Face detection indicator
+        // Top buttons
         Positioned(
-          bottom: 220,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: _detectedFaces.isEmpty
-                    ? Colors.red.withAlpha(200)
-                    : _isHeadPositionCorrect
-                        ? Colors.green.withAlpha(200)
-                        : Colors.orange.withAlpha(200),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _detectedFaces.isEmpty
-                        ? Icons.face_outlined
-                        : _isHeadPositionCorrect
-                            ? Icons.check_circle
-                            : Icons.info_outline,
-                    color: Colors.white,
+          top: 16,
+          left: 16,
+          right: 16,
+          child: Row(
+            children: [
+              // Cancel button
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    _stopCapture();
+                    Navigator.of(context).pop();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _detectedFaces.isEmpty
-                        ? 'Tidak ada wajah'
-                        : _isHeadPositionCorrect
-                            ? 'Posisi tepat! Capture...'
-                            : 'Posisi kurang tepat',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
+                  child: const Text('BATAL', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
               ),
-            ),
-          ),
-        ),
-        // Skip position button (only show after at least 1 frame is captured)
-        if (_capturedEmbeddings[_currentPosition]!.isNotEmpty)
-          Positioned(
-            top: 20,
-            right: 20,
-            child: FloatingActionButton(
-              heroTag: 'skip_position',
-              backgroundColor: Colors.orange,
-              mini: true,
-              onPressed: () {
-                if (_capturedEmbeddings[_currentPosition]!.length >= _minFramesPerPosition) {
-                  _moveToNextPosition();
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Minimal $_minFramesPerPosition frame diperlukan untuk skip'),
-                      duration: const Duration(seconds: 2),
+              // Skip button
+              if (_capturedEmbeddings[_currentPosition]!.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      if (_capturedEmbeddings[_currentPosition]!.length >= _minFramesPerPosition) {
+                        _moveToNextPosition();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Minimal $_minFramesPerPosition frame diperlukan untuk skip'),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange,
+                      side: const BorderSide(color: Colors.orange),
                     ),
-                  );
-                }
-              },
-              child: const Icon(Icons.skip_next),
-            ),
-          ),
-        // Next position button (only show when current position is complete)
-        if (_capturedEmbeddings[_currentPosition]!.length >= _requiredFramesPerPosition)
-          Positioned(
-            top: 20,
-            right: 70,
-            child: FloatingActionButton(
-              heroTag: 'next_position',
-              backgroundColor: Colors.green,
-              onPressed: () {
-                _moveToNextPosition();
-              },
-              child: const Icon(Icons.arrow_forward),
-            ),
-          ),
-        // Cancel button
-        Positioned(
-          top: 20,
-          left: 20,
-          child: FloatingActionButton(
-            heroTag: 'cancel_registration',
-            backgroundColor: Colors.red,
-            onPressed: () {
-              _stopCapture();
-              Navigator.of(context).pop();
-            },
-            child: const Icon(Icons.close),
+                    child: const Text('LEWATI', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+              // Next button
+              if (_capturedEmbeddings[_currentPosition]!.length >= _requiredFramesPerPosition) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _moveToNextPosition,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('LANJUT', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ],
@@ -811,7 +770,7 @@ class FaceOverlayPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0
+      ..strokeWidth = 2.0
       ..color = Colors.green;
 
     for (final face in faces) {
@@ -897,82 +856,77 @@ class FacePositioningGuidePainter extends CustomPainter {
     // Draw outer glow
     final glowPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 8
-      ..color = Colors.white.withAlpha(50)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      ..strokeWidth = 6
+      ..color = Colors.white.withAlpha(40)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
     canvas.drawOval(ovalRect, glowPaint);
 
     // Draw main oval outline
     final outlinePaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
-      ..color = Colors.white;
+      ..strokeWidth = 2
+      ..color = Colors.white.withAlpha(180);
     canvas.drawOval(ovalRect, outlinePaint);
 
-    // Draw directional arrow based on current position
-    final arrowPaint = Paint()
+    // Draw directional indicator
+    final indicatorPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 4
+      ..strokeWidth = 3
       ..color = Colors.cyan
       ..strokeCap = StrokeCap.round;
 
-    final arrowSize = 40.0;
-    final arrowOffset = 30.0;
+    final indicatorSize = 35.0;
+    final indicatorOffset = 25.0;
 
     switch (currentPosition) {
       case FacePosition.center:
-        // Draw checkmark or center indicator
+        // Draw center dot
         final centerPaint = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..color = Colors.green;
-        canvas.drawCircle(center, 20, centerPaint);
+          ..style = PaintingStyle.fill
+          ..color = Colors.green.withAlpha(180);
+        canvas.drawCircle(center, 15, centerPaint);
         break;
 
       case FacePosition.up:
-        // Draw arrow pointing up
-        final arrowStart = Offset(center.dx, center.dy - arrowOffset);
-        _drawUpArrow(canvas, arrowStart, arrowSize, arrowPaint);
+        final arrowStart = Offset(center.dx, center.dy - indicatorOffset);
+        _drawUpArrow(canvas, arrowStart, indicatorSize, indicatorPaint);
         break;
 
       case FacePosition.down:
-        // Draw arrow pointing down
-        final arrowStart = Offset(center.dx, center.dy + arrowOffset);
-        _drawDownArrow(canvas, arrowStart, arrowSize, arrowPaint);
+        final arrowStart = Offset(center.dx, center.dy + indicatorOffset);
+        _drawDownArrow(canvas, arrowStart, indicatorSize, indicatorPaint);
         break;
 
       case FacePosition.left:
-        // Draw arrow pointing left
-        final arrowStart = Offset(center.dx - arrowOffset, center.dy);
-        _drawLeftArrow(canvas, arrowStart, arrowSize, arrowPaint);
+        final arrowStart = Offset(center.dx - indicatorOffset, center.dy);
+        _drawLeftArrow(canvas, arrowStart, indicatorSize, indicatorPaint);
         break;
 
       case FacePosition.right:
-        // Draw arrow pointing right
-        final arrowStart = Offset(center.dx + arrowOffset, center.dy);
-        _drawRightArrow(canvas, arrowStart, arrowSize, arrowPaint);
+        final arrowStart = Offset(center.dx + indicatorOffset, center.dy);
+        _drawRightArrow(canvas, arrowStart, indicatorSize, indicatorPaint);
         break;
     }
 
     // Draw corner brackets
     final bracketPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 4
-      ..color = Colors.white.withAlpha(150)
+      ..strokeWidth = 3
+      ..color = Colors.white.withAlpha(120)
       ..strokeCap = StrokeCap.round;
 
-    final bracketLength = 30.0;
-    final cornerRadius = 20.0;
+    final bracketLength = 25.0;
+    final cornerRadius = 15.0;
 
     // Top-left corner
     final topLeft = Offset(ovalRect.left + cornerRadius, ovalRect.top + cornerRadius);
     canvas.drawLine(
-      Offset(ovalRect.left - 10, topLeft.dy),
+      Offset(ovalRect.left - 8, topLeft.dy),
       Offset(topLeft.dx - bracketLength / 2, topLeft.dy),
       bracketPaint,
     );
     canvas.drawLine(
-      Offset(topLeft.dx, ovalRect.top - 10),
+      Offset(topLeft.dx, ovalRect.top - 8),
       Offset(topLeft.dx, topLeft.dy - bracketLength / 2),
       bracketPaint,
     );
@@ -981,11 +935,11 @@ class FacePositioningGuidePainter extends CustomPainter {
     final topRight = Offset(ovalRect.right - cornerRadius, ovalRect.top + cornerRadius);
     canvas.drawLine(
       Offset(topRight.dx + bracketLength / 2, topRight.dy),
-      Offset(ovalRect.right + 10, topRight.dy),
+      Offset(ovalRect.right + 8, topRight.dy),
       bracketPaint,
     );
     canvas.drawLine(
-      Offset(topRight.dx, ovalRect.top - 10),
+      Offset(topRight.dx, ovalRect.top - 8),
       Offset(topRight.dx, topRight.dy - bracketLength / 2),
       bracketPaint,
     );
@@ -993,12 +947,12 @@ class FacePositioningGuidePainter extends CustomPainter {
     // Bottom-left corner
     final bottomLeft = Offset(ovalRect.left + cornerRadius, ovalRect.bottom - cornerRadius);
     canvas.drawLine(
-      Offset(ovalRect.left - 10, bottomLeft.dy),
+      Offset(ovalRect.left - 8, bottomLeft.dy),
       Offset(bottomLeft.dx - bracketLength / 2, bottomLeft.dy),
       bracketPaint,
     );
     canvas.drawLine(
-      Offset(bottomLeft.dx, ovalRect.bottom + 10),
+      Offset(bottomLeft.dx, ovalRect.bottom + 8),
       Offset(bottomLeft.dx, bottomLeft.dy + bracketLength / 2),
       bracketPaint,
     );
@@ -1007,11 +961,11 @@ class FacePositioningGuidePainter extends CustomPainter {
     final bottomRight = Offset(ovalRect.right - cornerRadius, ovalRect.bottom - cornerRadius);
     canvas.drawLine(
       Offset(bottomRight.dx + bracketLength / 2, bottomRight.dy),
-      Offset(ovalRect.right + 10, bottomRight.dy),
+      Offset(ovalRect.right + 8, bottomRight.dy),
       bracketPaint,
     );
     canvas.drawLine(
-      Offset(bottomRight.dx, ovalRect.bottom + 10),
+      Offset(bottomRight.dx, ovalRect.bottom + 8),
       Offset(bottomRight.dx, bottomRight.dy + bracketLength / 2),
       bracketPaint,
     );
