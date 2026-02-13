@@ -464,6 +464,14 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
     return Stack(
       children: [
         Center(child: CameraPreview(_cameraController!)),
+        // Face positioning guide
+        const Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: FacePositioningGuide(),
+        ),
         FaceOverlay(
           faces: _detectedFaces,
           imageSize: Size(
@@ -638,5 +646,140 @@ class FaceOverlayPainter extends CustomPainter {
   @override
   bool shouldRepaint(FaceOverlayPainter oldDelegate) {
     return oldDelegate.faces != faces || oldDelegate.isFrontCamera != isFrontCamera;
+  }
+}
+
+/// Face positioning guide for detection screen (simpler version)
+class FacePositioningGuide extends StatelessWidget {
+  const FacePositioningGuide({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final screenHeight = constraints.maxHeight;
+
+        final ovalWidth = screenWidth * 0.6;
+        final ovalHeight = screenHeight * 0.5;
+
+        return CustomPaint(
+          size: Size(screenWidth, screenHeight),
+          painter: FacePositioningGuidePainter(
+            ovalWidth: ovalWidth,
+            ovalHeight: ovalHeight,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class FacePositioningGuidePainter extends CustomPainter {
+  final double ovalWidth;
+  final double ovalHeight;
+
+  FacePositioningGuidePainter({
+    required this.ovalWidth,
+    required this.ovalHeight,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+
+    final ovalRect = Rect.fromCenter(
+      center: center,
+      width: ovalWidth,
+      height: ovalHeight,
+    );
+
+    // Draw outer glow
+    final glowPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6
+      ..color = Colors.white.withAlpha(40)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawOval(ovalRect, glowPaint);
+
+    // Draw main oval outline
+    final outlinePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = Colors.white.withAlpha(180);
+    canvas.drawOval(ovalRect, outlinePaint);
+
+    // Draw center indicator
+    final centerPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = Colors.green.withAlpha(150);
+    canvas.drawCircle(center, 12, centerPaint);
+
+    // Draw corner brackets
+    final bracketPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..color = Colors.white.withAlpha(120)
+      ..strokeCap = StrokeCap.round;
+
+    final bracketLength = 25.0;
+    final cornerRadius = 15.0;
+
+    // Top-left corner
+    final topLeft = Offset(ovalRect.left + cornerRadius, ovalRect.top + cornerRadius);
+    canvas.drawLine(
+      Offset(ovalRect.left - 8, topLeft.dy),
+      Offset(topLeft.dx - bracketLength / 2, topLeft.dy),
+      bracketPaint,
+    );
+    canvas.drawLine(
+      Offset(topLeft.dx, ovalRect.top - 8),
+      Offset(topLeft.dx, topLeft.dy - bracketLength / 2),
+      bracketPaint,
+    );
+
+    // Top-right corner
+    final topRight = Offset(ovalRect.right - cornerRadius, ovalRect.top + cornerRadius);
+    canvas.drawLine(
+      Offset(topRight.dx + bracketLength / 2, topRight.dy),
+      Offset(ovalRect.right + 8, topRight.dy),
+      bracketPaint,
+    );
+    canvas.drawLine(
+      Offset(topRight.dx, ovalRect.top - 8),
+      Offset(topRight.dx, topRight.dy - bracketLength / 2),
+      bracketPaint,
+    );
+
+    // Bottom-left corner
+    final bottomLeft = Offset(ovalRect.left + cornerRadius, ovalRect.bottom - cornerRadius);
+    canvas.drawLine(
+      Offset(ovalRect.left - 8, bottomLeft.dy),
+      Offset(bottomLeft.dx - bracketLength / 2, bottomLeft.dy),
+      bracketPaint,
+    );
+    canvas.drawLine(
+      Offset(bottomLeft.dx, ovalRect.bottom + 8),
+      Offset(bottomLeft.dx, bottomLeft.dy + bracketLength / 2),
+      bracketPaint,
+    );
+
+    // Bottom-right corner
+    final bottomRight = Offset(ovalRect.right - cornerRadius, ovalRect.bottom - cornerRadius);
+    canvas.drawLine(
+      Offset(bottomRight.dx + bracketLength / 2, bottomRight.dy),
+      Offset(ovalRect.right + 8, bottomRight.dy),
+      bracketPaint,
+    );
+    canvas.drawLine(
+      Offset(bottomRight.dx, ovalRect.bottom + 8),
+      Offset(bottomRight.dx, bottomRight.dy + bracketLength / 2),
+      bracketPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(FacePositioningGuidePainter oldDelegate) {
+    return oldDelegate.ovalWidth != ovalWidth || oldDelegate.ovalHeight != ovalHeight;
   }
 }
