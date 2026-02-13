@@ -355,10 +355,6 @@ class FaceOverlayPainter extends CustomPainter {
       ..strokeWidth = 3.0
       ..color = Colors.green;
 
-    final landmarkPaint = Paint()
-      ..style = PaintingStyle.fill
-      ..color = Colors.blue;
-
     for (final face in faces) {
       final boundingBox = face.boundingBox;
 
@@ -379,44 +375,7 @@ class FaceOverlayPainter extends CustomPainter {
 
       final rect = Rect.fromLTRB(left, top, right, bottom);
       canvas.drawRect(rect, paint);
-
-      final landmarks = face.landmarks;
-      if (landmarks.isNotEmpty) {
-        _drawLandmarks(canvas, landmarks, scaleX, scaleY, landmarkPaint);
-      }
     }
-  }
-
-  void _drawLandmarks(
-    Canvas canvas,
-    Map<FaceLandmarkType, FaceLandmark?> landmarks,
-    double scaleX,
-    double scaleY,
-    Paint paint,
-  ) {
-    void drawPoint(FaceLandmarkType type) {
-      final landmark = landmarks[type];
-      if (landmark != null) {
-        double x = landmark.position.x * scaleX;
-        double y = landmark.position.y * scaleY;
-
-        // For front camera, mirror the X coordinate
-        if (isFrontCamera) {
-          x = imageSize.width * scaleX - x;
-        }
-
-        canvas.drawCircle(Offset(x, y), 5, paint);
-      }
-    }
-
-    drawPoint(FaceLandmarkType.leftEye);
-    drawPoint(FaceLandmarkType.rightEye);
-    drawPoint(FaceLandmarkType.noseBase);
-    drawPoint(FaceLandmarkType.leftEar);
-    drawPoint(FaceLandmarkType.rightEar);
-    drawPoint(FaceLandmarkType.leftMouth);
-    drawPoint(FaceLandmarkType.rightMouth);
-    drawPoint(FaceLandmarkType.bottomMouth);
   }
 
   @override
