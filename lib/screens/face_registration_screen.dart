@@ -7,6 +7,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../services/face_detector_service.dart';
 import '../services/face_recognition_service.dart';
 import '../services/face_storage_service.dart';
+import '../services/image_quality_service.dart';
 
 enum FacePosition {
   center,
@@ -34,6 +35,7 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
   final FaceDetectorService _faceDetectorService = FaceDetectorService();
   final FaceRecognitionService _faceRecognitionService = FaceRecognitionService();
   final FaceStorageService _faceStorageService = FaceStorageService();
+  final ImageQualityService _imageQualityService = ImageQualityService();
 
   List<Face> _detectedFaces = [];
   bool _isProcessing = false;
@@ -42,6 +44,7 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
   String? _errorMessage;
   bool _isHeadPositionCorrect = false;
   String? _headPositionFeedback;
+  ImageQualityResult? _imageQualityResult;
 
   Timer? _captureTimer;
   final Map<FacePosition, List<List<double>>> _capturedEmbeddings = {
@@ -304,6 +307,7 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
 
     _isProcessing = true;
     _headPositionFeedback = null;
+    _imageQualityResult = null;
 
     try {
       final image = await _cameraController!.takePicture();
@@ -315,12 +319,16 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         final face = _faceDetectorService.faces.first;
         final isPositionCorrect = _checkHeadPosition(face);
 
+        // Check image quality
+        final qualityResult = await _imageQualityService.checkImageQuality(image.path);
+
         setState(() {
           _isHeadPositionCorrect = isPositionCorrect;
           _detectedFaces = _faceDetectorService.faces;
+          _imageQualityResult = qualityResult;
         });
 
-        if (isPositionCorrect) {
+        if (isPositionCorrect && qualityResult.isGood) {
           final embedding = await _faceRecognitionService.getFaceEmbedding(image.path, face);
 
           setState(() {
@@ -332,6 +340,7 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
           setState(() {
             _isHeadPositionCorrect = false;
             _detectedFaces = _faceDetectorService.faces;
+            _imageQualityResult = null;
           });
         }
       }
@@ -347,6 +356,7 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
         setState(() {
           _isHeadPositionCorrect = false;
           _detectedFaces = [];
+          _imageQualityResult = null;
         });
       }
     } finally {
@@ -537,6 +547,20 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
                       textAlign: TextAlign.center,
                     ),
                   ),
+                // Image quality feedback
+                if (_imageQualityResult != null && !_imageQualityResult!.isGood)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _imageQualityService.getFeedbackMessage(_imageQualityResult!),
+                      style: TextStyle(
+                        color: _imageQualityService.getIndicatorColor(_imageQualityResult!),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -641,17 +665,21 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen>
                 decoration: BoxDecoration(
                   color: _detectedFaces.isEmpty
                       ? Colors.red.withAlpha(200)
-                      : _isHeadPositionCorrect
-                          ? Colors.green.withAlpha(200)
-                          : Colors.orange.withAlpha(200),
+                      : (_imageQualityResult != null && !_imageQualityResult!.isGood)
+                          ? Colors.red.withAlpha(200)
+                          : _isHeadPositionCorrect
+                              ? Colors.green.withAlpha(200)
+                              : Colors.orange.withAlpha(200),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   _detectedFaces.isEmpty
                       ? 'Tidak ada wajah'
-                      : _isHeadPositionCorrect
-                          ? 'Posisi tepat! Mengcapture...'
-                          : 'Posisi kurang tepat',
+                      : _imageQualityResult != null && !_imageQualityResult!.isGood
+                          ? _imageQualityService.getFeedbackMessage(_imageQualityResult!)
+                          : _isHeadPositionCorrect
+                              ? 'Posisi tepat! Mengcapture...'
+                              : 'Posisi kurang tepat',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 13,
