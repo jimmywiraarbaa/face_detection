@@ -8,6 +8,7 @@ import '../services/face_detector_service.dart';
 import '../services/face_recognition_service.dart';
 import '../services/face_storage_service.dart';
 import 'face_registration_screen.dart';
+import 'registered_users_screen.dart';
 
 class FaceDetectionScreen extends StatefulWidget {
   const FaceDetectionScreen({super.key});
@@ -345,52 +346,13 @@ class _FaceDetectionScreenState extends State<FaceDetectionScreen>
   }
 
   Future<void> _showRegisteredFacesDialog() async {
-    await _loadRegisteredFaces();
-
     if (!mounted) return;
-
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Registered Faces (${_registeredFaces.length})'),
-          content: _registeredFaces.isEmpty
-              ? const Text('No faces registered yet.')
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ...ListTile.divideTiles(
-                      tiles: _registeredFaces.map((face) {
-                        return ListTile(
-                          title: Text(face.name),
-                          subtitle: Text(
-                            'Registered: ${face.registeredAt.day}/${face.registeredAt.month}/${face.registeredAt.year}',
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete),
-                            onPressed: () async {
-                              await _faceStorageService.deleteFace(face.name);
-                              if (!mounted) return;
-                              Navigator.of(context).pop();
-                              await _loadRegisteredFaces();
-                              if (!mounted) return;
-                              _showRegisteredFacesDialog();
-                            },
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-          actions: <Widget>[
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const RegisteredUsersScreen(),
+      ),
     );
+    await _loadRegisteredFaces();
   }
 
   @override
